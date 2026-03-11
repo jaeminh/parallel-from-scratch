@@ -88,11 +88,10 @@ def example_all_gather():
 def example_scatter():
     if dist.get_rank() == 0:
         scatter_list = [torch.tensor([i + 1] * 5, dtype=torch.float32).cuda() for i in range(dist.get_world_size())]
-        print(f"Rank 0: Tensor to scatter: {scatter_list}")
     else:
         scatter_list = None
     tensor = torch.zeros(5, dtype=torch.float32).cuda()
-    print(f"Before scatter on rank {dist.get_rank()}: {tensor}")
+    print(f"Before scatter on rank {dist.get_rank()}: {scatter_list}")
 
     # NOTE: tensor: torch.Tensor,
     # NOTE: scatter_list: Optional[list[torch.Tensor]] = None,
@@ -132,19 +131,26 @@ def example_reduce_scatter():
 def example_all_to_all():
     """This example demonstrates the All-to-All operation, where each rank sends a unique tensor to every other rank and receives a unique tensor from every other rank.
 
-    input_list (2 GPUs):
-        Rank 0: [tensor([1.]), tensor([2.])]   → chunk[0]은 rank0에게, chunk[1]은 rank1에게
-        Rank 1: [tensor([2.]), tensor([4.])]   → chunk[0]은 rank0에게, chunk[1]은 rank1에게
+    input_list (2 GPUs, chunk_size=3):
+        Rank 0: [tensor([11., 12., 13.]), tensor([21., 22., 23.])]   → chunk[0]은 rank0에게, chunk[1]은 rank1에게
+        Rank 1: [tensor([31., 32., 33.]), tensor([41., 42., 43.])]   → chunk[0]은 rank0에게, chunk[1]은 rank1에게
 
     output_list:
-        Rank 0: [tensor([1.]), tensor([2.])]   ← rank0에서 온 것, rank1에서 온 것
-        Rank 1: [tensor([2.]), tensor([4.])]   ← rank0에서 온 것, rank1에서 온 것
+        Rank 0: [tensor([11., 12., 13.]), tensor([31., 32., 33.])]   ← rank0에서 온 것, rank1에서 온 것
+        Rank 1: [tensor([21., 22., 23.]), tensor([41., 42., 43.])]   ← rank0에서 온 것, rank1에서 온 것
     """
     rank = dist.get_rank()
     world_size = dist.get_world_size()
+    chunk_size = 3
 
-    input_list = [torch.tensor([(rank + 1) * (i + 1)], dtype=torch.float32).cuda() for i in range(world_size)]
-    output_list = [torch.zeros(1, dtype=torch.float32).cuda() for _ in range(world_size)]
+    # 각 rank가 다른 rank에게 보낼 텐서 리스트
+    # Rank 0: base=10,20 → [11,12,13], [21,22,23]
+    # Rank 1: base=30,40 → [31,32,33], [41,42,43]
+    input_list = [
+        torch.tensor([(rank * world_size + i + 1) * 10 + j + 1 for j in range(chunk_size)], dtype=torch.float32).cuda()
+        for i in range(world_size)
+    ]
+    output_list = [torch.zeros(chunk_size, dtype=torch.float32).cuda() for _ in range(world_size)]
     print(f"Before All-to-All on rank {rank}: {input_list}")
 
     dist.all_to_all(output_list, input_list)
