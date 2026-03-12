@@ -66,7 +66,7 @@ def example_all_to_all_single_with_split_sizes():
     [Rank 0] Received tensor after All-to-All: [0, 1, 2, 10, 11, 12, 13]
     [Rank 1] Received tensor after All-to-All: [3, 4, 14, 15, 16]
 
-    So, Rank 0 send [3, 4] to Rank 1, while Rank 1 send [10, 11, 12, 13] to Rank 0.
+    Rank 0 send [3, 4] to Rank 1, while Rank 1 send [10, 11, 12, 13] to Rank 0.
     Because the second element of output splits is 4 for Rank 0, it means Rank 0 will receive 4 tokens from Rank 1, which are [10, 11, 12, 13].
     Then Rank 0 will concatenate the 3 tokens it keeps ([0, 1, 2]) with the 4 tokens it receives from Rank 1 to form the final received tensor [0, 1, 2, 10, 11, 12, 13].
     """
