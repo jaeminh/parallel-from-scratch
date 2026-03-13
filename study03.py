@@ -117,13 +117,8 @@ def run(step, router_type="uniform"):
     # 3-2) recv_counts 교환: all_to_all_single으로 send_counts를 교환하여 recv_counts 얻기
     #      recv_counts[i] = GPU i로부터 이 Rank가 받을 토큰 수
     # ===========================================================
-    send_counts = torch.zeros(world_size, dtype=torch.long, device="cuda")
-    for i in range(world_size):
-        send_counts[i] = (gpu_indices == i).sum()
-
-    recv_counts = torch.zeros(world_size, dtype=torch.long, device="cuda")
-
-    dist.all_to_all_single(recv_counts, send_counts)
+    send_counts = torch.zeros(1)
+    recv_counts = torch.zeros(1)
 
     print(f"[Rank {rank}] Tokens to send: {send_counts.tolist()}")
     print(f"[Rank {rank}] Tokens to receive: {recv_counts.tolist()}")
@@ -178,16 +173,6 @@ def run(step, router_type="uniform"):
     send_splits = send_counts.tolist()
     recv_splits = recv_counts.tolist()
 
-    num_recv_tokens = sum(recv_splits)
-
-    recv_tensor = torch.zeros(num_recv_tokens, EMBED_DIM, device="cuda")
-    dist.all_to_all_single(recv_tensor, sorted_tokens, recv_splits, send_splits)
-    print(f"[Rank {rank}] Received tensor after All-to-All: {recv_tensor.tolist()}")
-
-    recv_expert_ids = torch.zeros(num_recv_tokens, dtype=torch.long, device="cuda")
-    dist.all_to_all_single(recv_expert_ids, sorted_expert_ids, recv_splits, send_splits)
-    print(f"[Rank {rank}] Received Expert IDs after All-to-All: {recv_expert_ids.tolist()}")
-
     dist.barrier()
     print()
     if step <= 5:
@@ -196,14 +181,15 @@ def run(step, router_type="uniform"):
 
     # ===========================================================
     # Step 6: Forward through Experts
+    # NOTE: Remove lines below after implementing Step 5
     # ===========================================================
-    expert_output = torch.zeros_like(recv_tensor)
-    for local_i, expert_id in enumerate(local_expert_ids):
-        mask = recv_expert_ids == expert_id
-        if mask.any():
-            expert_input = recv_tensor[mask]
-            expert_out = local_expert_modules[local_i](expert_input)
-            expert_output[mask] = expert_out
+    # expert_output = torch.zeros_like(recv_tensor)
+    # for local_i, expert_id in enumerate(local_expert_ids):
+    #     mask = recv_expert_ids == expert_id
+    #     if mask.any():
+    #         expert_input = recv_tensor[mask]
+    #         expert_out = local_expert_modules[local_i](expert_input)
+    #         expert_output[mask] = expert_out
 
     # print(f"[Rank {rank}] Expert output: {expert_output.tolist()}")
 
@@ -223,11 +209,8 @@ def run(step, router_type="uniform"):
     #      Step 4에서 argsort로 정렬했으므로, sorted_indices를 역으로 적용하면 복원 가능
     #      힌트: final_output[sorted_indices] = result_recv
     # ===========================================================
-    result_recv = torch.zeros(num_local_tokens, EMBED_DIM, device="cuda")
-    dist.all_to_all_single(result_recv, expert_output, send_splits, recv_splits)
-
-    final_output = torch.zeros_like(result_recv)
-    final_output[sorted_indices] = result_recv
+    result_recv = torch.zeros(1)
+    final_output = torch.zeros(1)
 
     if rank == 0:
         print(f"[Rank {rank}]")
@@ -236,12 +219,12 @@ def run(step, router_type="uniform"):
         print(f"final_output:      {final_output.tolist()}")
 
     # ===========================================================
-    # 7-1: Gating weight
+    # 7-3: Gating weight
+    # NOTE: Remove lines below after implementing Step 7
     # ===========================================================
-    selected_weights = router_probs[torch.arange(num_local_tokens, device="cuda"), expert_indices]
-    final_output = final_output * selected_weights.unsqueeze(-1)
-
-    final_output = final_output.view(1, SEQ_LEN, EMBED_DIM)
+    # selected_weights = router_probs[torch.arange(num_local_tokens, device="cuda"), expert_indices]
+    # final_output = final_output * selected_weights.unsqueeze(-1)
+    # final_output = final_output.view(1, SEQ_LEN, EMBED_DIM)
 
     dist.destroy_process_group()
 
