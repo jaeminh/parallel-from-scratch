@@ -110,11 +110,12 @@ def run(step, router_type="uniform"):
     # ===========================================================
     # Step 3: Prepare All-to-All (send/recv counts exchange)
     # ===========================================================
-    # TODO: Implement
-    # send_counts: 각 GPU가 다른 GPU로 보낼 토큰 수 (world_size 길이의 벡터)
-    # recv_counts: 각 GPU가 다른 GPU로부터 받을 토큰 수 (world_size 길이의 벡터)
+    # TODO
+    # 3-1) send_counts 계산: gpu_indices를 이용해 각 GPU로 보낼 토큰 수를 세기
+    #      send_counts[i] = 이 Rank에서 GPU i로 보낼 토큰 수
     #
-    # Rank마다 보낼 토큰 수 계산 (send_counts) → All-to-All로 recv_counts 교환
+    # 3-2) recv_counts 교환: all_to_all_single으로 send_counts를 교환하여 recv_counts 얻기
+    #      recv_counts[i] = GPU i로부터 이 Rank가 받을 토큰 수
     # ===========================================================
     send_counts = torch.zeros(world_size, dtype=torch.long, device="cuda")
     for i in range(world_size):
@@ -135,9 +136,10 @@ def run(step, router_type="uniform"):
     # ===========================================================
     # Step 4: Sort tokens by GPU index (for efficient All-to-All)
     # ===========================================================
-    # NOTE: torch.argsort is important for correct token ordering during All-to-All communication in Expert Parallel.
+    # NOTE: all_to_all_single은 send_splits 순서대로 텐서를 연속(contiguous) 슬라이싱하여 전송한다.
+    #   예) send_splits=[3,2] → 앞 3개는 GPU0으로, 뒤 2개는 GPU1로
+    #   따라서 토큰이 목적지 GPU 순서대로 정렬되어 있어야 올바르게 전송된다.
     sorted_indices = torch.argsort(expert_indices)
-    # sorted_indices = torch.argsort(expert_indices, stable=True)
     sorted_tokens = local_tokens[sorted_indices]
     sorted_expert_ids = expert_indices[sorted_indices]
 
@@ -161,11 +163,17 @@ def run(step, router_type="uniform"):
     # ===========================================================
     # Step 5: All-to-All Dispatch
     # ===========================================================
-    # TODO: Implement
-    # recv_tensor: 각 GPU가 받을 토큰 (num_recv_tokens, embed_dim)
-    # recv_expert_ids: 각 GPU가 받을 토큰의 Expert ID (num_recv_tokens,)
+    # TODO
+    # 5-1) split 크기 준비: send_counts, recv_counts를 list[int]로 변환
+    #      all_to_all_single의 split 인자는 list[int] 형태여야 합니다.
     #
-    # all_to_all_single은 list[int] 형태의 send_counts/recv_counts를 필요로 합니다.
+    # 5-2) 토큰 데이터 전송: sorted_tokens → recv_tensor
+    #      recv_tensor 크기 = (sum(recv_splits), EMBED_DIM)
+    #      힌트: dist.all_to_all_single(recv_tensor, sorted_tokens, recv_splits, send_splits)
+    #
+    # 5-3) Expert ID 전송: sorted_expert_ids → recv_expert_ids
+    #      받는 GPU에서 어떤 Expert로 처리할지 알아야 하므로 Expert ID도 함께 전송
+    #      힌트: sorted_expert_ids는 long이지만 all_to_all_single은 float 텐서만 지원
     # ===========================================================
     send_splits = send_counts.tolist()
     recv_splits = recv_counts.tolist()
@@ -206,12 +214,14 @@ def run(step, router_type="uniform"):
     # ===========================================================
     # Step 7: All-to-All Combine + Unsort + Gating weight
     # ===========================================================
-    # TODO: Implement
-    # result_recv: All-to-All로 받은 Expert 출력 (num_local_tokens, embed_dim)
-    # final_output: 원래 토큰 순서로 복원된 최종 출력 (num_local_tokens, embed_dim)
+    # TODO
+    # 7-1) All-to-All로 Expert 출력을 원래 GPU로 반환: expert_output → result_recv
+    #      result_recv 크기 = (num_local_tokens, EMBED_DIM)
+    #      힌트: Step 5의 Dispatch와 반대 방향. send_splits/recv_splits의 역할이 뒤바뀝니다.
     #
-    # result_recv는 send_splits/recv_splits를 이용하면 구현할 수 있습니다.
-    # final_output은 sorted_indices를 역으로 적용하면 복원할 수 있습니다.
+    # 7-2) 원래 토큰 순서로 복원: result_recv → final_output
+    #      Step 4에서 argsort로 정렬했으므로, sorted_indices를 역으로 적용하면 복원 가능
+    #      힌트: final_output[sorted_indices] = result_recv
     # ===========================================================
     result_recv = torch.zeros(num_local_tokens, EMBED_DIM, device="cuda")
     dist.all_to_all_single(result_recv, expert_output, send_splits, recv_splits)
