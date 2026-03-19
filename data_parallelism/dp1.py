@@ -4,7 +4,6 @@ import torch.nn as nn
 from utils import Simple3LayerModel, create_local_data, verify_params_sync
 
 
-# NOTE: all-reduce를 이용해서 모든 GPU의 gradient를 평균
 def allreduce_gradients(model: nn.Module, world_size: int):
     for param in model.parameters():
         if param.grad is not None:
